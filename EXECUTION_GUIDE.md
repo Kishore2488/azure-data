@@ -2,8 +2,13 @@
 
 ## Table of Contents
 1. [Local Execution](#local-execution)
-2. [Azure Cloud Deployment](#azure-cloud-deployment)
-3. [Troubleshooting](#troubleshooting)
+2. [Azure Databricks Deployment](#azure-databricks-deployment)
+3. [Azure Synapse Analytics Deployment](#azure-synapse-analytics-deployment)
+4. [Azure Container Instances Deployment](#azure-container-instances-deployment)
+5. [Microsoft Fabric Deployment](#microsoft-fabric-deployment)
+6. [GitHub Actions CI/CD](#github-actions-cicd)
+7. [Monitoring & Troubleshooting](#monitoring--troubleshooting)
+8. [Cost Optimization](#cost-optimization)
 
 ---
 
@@ -15,7 +20,7 @@
 - Git
 - pip (Python package manager)
 
-### Step 1: Clone the Repository
+### Step 1: Clone Repository
 
 ```bash
 git clone https://github.com/Kishore2488/azure-data.git
@@ -47,6 +52,7 @@ pip install -r requirements.txt
 
 ```bash
 python -c "import pyspark; print(f'PySpark version: {pyspark.__version__}')"
+java -version
 ```
 
 ### Step 5: Run the Application
@@ -55,22 +61,31 @@ python -c "import pyspark; print(f'PySpark version: {pyspark.__version__}')"
 python main.py
 ```
 
-**Expected Output:**
-- Display of Customers, Products, and Orders tables
-- Join results combining all three tables
-- Aggregation statistics (total sales, average order value, etc.)
-- High-value order filtering
-- Summary statistics
-- Files saved to `output/` directory
+### Expected Output
+
+The script will display:
+- ✓ Customers table (8 rows)
+- ✓ Products table (8 rows)
+- ✓ Orders table (12 rows)
+- ✓ Customer Orders JOIN (12 rows with product details)
+- ✓ Aggregated sales by customer
+- ✓ High-value orders (>$300)
+- ✓ Sales by product category
+- ✓ Top 5 customers by revenue
+- ✓ Summary statistics
+- ✓ Output files saved to `output/` directory
 
 ### Step 6: View Results
 
 ```bash
-# View Parquet results (requires pandas)
+# View directory structure
+ls -la output/
+
+# View Parquet results
 python -c "import pandas as pd; df = pd.read_parquet('output/customer_orders'); print(df.head())"
 
 # View CSV results
-cat output/sales_by_customer/part-00000-*.csv
+cat output/sales_by_customer/part-*.csv
 ```
 
 ### Step 7: Stop Virtual Environment
@@ -81,49 +96,22 @@ deactivate
 
 ---
 
-## Azure Cloud Deployment
+## Azure Databricks Deployment
 
-### Architecture Overview
-
-```
-Local Development
-    ↓
-    ├── GitHub Repository
-    ↓
-    ├── Azure DevOps / GitHub Actions
-    ↓
-    ├── Azure Synapse Analytics / Azure Databricks
-    ↓
-    ├── Data Lake Storage (ADLS)
-    ↓
-    └── Results & Dashboards
-```
-
-### Prerequisites for Azure
-
+### Prerequisites
 - Azure subscription
 - Azure CLI installed
-- Azure Storage account
-- Azure Databricks workspace (or Synapse Analytics)
-- Service Principal for authentication
+- `az login` completed
 
----
-
-### Option A: Deploy to Azure Databricks
-
-#### Step 1: Set Up Azure Databricks Workspace
+### Step 1: Create Resource Group
 
 ```bash
-# Install Azure CLI
-curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-
-# Login to Azure
-az login
-
-# Create resource group
 az group create --name spark-sql-rg --location eastus
+```
 
-# Create Databricks workspace
+### Step 2: Create Databricks Workspace
+
+```bash
 az databricks workspace create \
   --resource-group spark-sql-rg \
   --name spark-sql-workspace \
@@ -131,22 +119,20 @@ az databricks workspace create \
   --sku premium
 ```
 
-#### Step 2: Configure Databricks CLI
+### Step 3: Install and Configure Databricks CLI
 
 ```bash
-# Install Databricks CLI
 pip install databricks-cli
 
-# Configure CLI (get token from workspace)
 databricks configure --token
 # Enter host: https://<region>.azuredatabricks.net
-# Enter token: <your-databricks-token>
+# Enter token: <your-databricks-personal-token>
 ```
 
-#### Step 3: Upload Files to Databricks
+### Step 4: Create DBFS Directory and Upload Files
 
 ```bash
-# Create directory in DBFS
+# Create directory
 databricks fs mkdirs dbfs:/spark-sql-demo
 
 # Upload data files
@@ -158,19 +144,18 @@ databricks fs cp data/orders.csv dbfs:/spark-sql-demo/orders.csv --overwrite
 databricks fs cp main.py dbfs:/spark-sql-demo/main.py --overwrite
 ```
 
-#### Step 4: Create Databricks Notebook
+### Step 5: Create Databricks Notebook
 
-Create a notebook in Databricks with the following content:
+1. Log in to Databricks workspace
+2. Click "Create" → "Notebook"
+3. Name: `spark-sql-demo`
+4. Language: Python
+5. Cluster: Create or select existing
+
+### Step 6: Add Code to Notebook
 
 ```python
 # Databricks notebook source
-# Mount Azure Storage
-dbutils.fs.mount(
-  source = "wasbs://spark-data@<storage-account>.blob.core.windows.net",
-  mount_point = "/mnt/spark-data",
-  extra_configs = {"fs.azure.account.key.<storage-account>.blob.core.windows.net":"<storage-key>"}
-)
-
 # Read data from DBFS
 customers_df = spark.read.csv("dbfs:/spark-sql-demo/customers.csv", header=True, inferSchema=True)
 products_df = spark.read.csv("dbfs:/spark-sql-demo/products.csv", header=True, inferSchema=True)
@@ -187,7 +172,8 @@ SELECT
     c.customer_id,
     c.customer_name,
     COUNT(o.order_id) AS order_count,
-    SUM(o.total_amount) AS total_spent
+    SUM(o.total_amount) AS total_spent,
+    AVG(o.total_amount) AS avg_order
 FROM orders o
 JOIN customers c ON o.customer_id = c.customer_id
 GROUP BY c.customer_id, c.customer_name
@@ -198,74 +184,53 @@ result_df = spark.sql(query)
 result_df.show()
 
 # Save results
-result_df.write.mode("overwrite").parquet("/mnt/spark-data/output/sales_by_customer")
+result_df.write.mode("overwrite").parquet("dbfs:/spark-sql-demo/output/sales_by_customer")
 ```
 
-#### Step 5: Create and Run a Job
+### Step 7: Run Notebook
+
+1. Click "Run" → "Run All"
+2. Monitor execution
+3. Check results in Spark UI
+
+### Step 8: View Results
 
 ```bash
-# Create job from notebook
-databricks jobs create --json '{
-  "name": "spark-sql-demo-job",
-  "new_cluster": {
-    "spark_version": "11.3.x-scala2.12",
-    "node_type_id": "i3.xlarge",
-    "num_workers": 2
-  },
-  "notebook_task": {
-    "notebook_path": "/spark-sql-demo/main"
-  }
-}'
-
-# Run the job
-databricks jobs run-now --job-id <job-id>
-
-# Check job status
-databricks jobs get-run --run-id <run-id>
+# Download results
+databricks fs cp dbfs:/spark-sql-demo/output/sales_by_customer -r output/ --overwrite
 ```
 
 ---
 
-### Option B: Deploy to Azure Synapse Analytics
+## Azure Synapse Analytics Deployment
 
-#### Step 1: Create Synapse Workspace
+### Prerequisites
+- Azure subscription
+- Azure CLI installed
+
+### Step 1: Create Storage Account
 
 ```bash
-# Create storage account for Synapse
 az storage account create \
-  --name sparksynapsestr \
+  --name synapsestorage123 \
   --resource-group spark-sql-rg \
-  --location eastus
+  --location eastus \
+  --sku Standard_LRS
+```
 
-# Create Synapse workspace
+### Step 2: Create Synapse Workspace
+
+```bash
 az synapse workspace create \
   --name spark-sql-synapse \
   --resource-group spark-sql-rg \
-  --storage-account sparksynapsestr \
+  --storage-account synapsestorage123 \
   --file-system synapsefs \
   --sql-admin-login-user sqladmin \
   --sql-admin-login-password P@ssw0rd123!
 ```
 
-#### Step 2: Upload Data to Data Lake
-
-```bash
-# Get storage account key
-STORAGE_KEY=$(az storage account keys list \
-  --resource-group spark-sql-rg \
-  --account-name sparksynapsestr \
-  --query [0].value -o tsv)
-
-# Upload files to blob storage
-az storage blob upload-batch \
-  --destination synapsefs \
-  --source data/ \
-  --account-name sparksynapsestr \
-  --account-key $STORAGE_KEY \
-  --destination-path spark-sql-demo
-```
-
-#### Step 3: Create Synapse Spark Pool
+### Step 3: Create Spark Pool
 
 ```bash
 az synapse spark pool create \
@@ -273,137 +238,265 @@ az synapse spark pool create \
   --workspace-name spark-sql-synapse \
   --resource-group spark-sql-rg \
   --spark-version 3.1 \
-  --node-count 3
+  --node-count 3 \
+  --node-size Small
 ```
 
-#### Step 4: Create Synapse Notebook
+### Step 4: Upload Data to Storage
 
 ```bash
-# Create notebook script
-cat > synapse_notebook.py << 'EOF'
+# Get storage key
+STORAGE_KEY=$(az storage account keys list \
+  --resource-group spark-sql-rg \
+  --account-name synapsestorage123 \
+  --query [0].value -o tsv)
+
+# Upload files
+az storage blob upload-batch \
+  --destination synapsefs \
+  --source data/ \
+  --account-name synapsestorage123 \
+  --account-key $STORAGE_KEY \
+  --destination-path spark-sql-demo
+```
+
+### Step 5: Create Synapse Notebook
+
+1. Go to https://web.azuresynapse.net/
+2. Select workspace: `spark-sql-synapse`
+3. Click "Create" → "Notebook"
+4. Attach to pool: `sparksql-pool`
+
+### Step 6: Add Code to Notebook
+
+```python
 # Read from Data Lake
-customers_df = spark.read.csv("abfss://synapsefs@sparksynapsestr.dfs.core.windows.net/spark-sql-demo/customers.csv", header=True, inferSchema=True)
-products_df = spark.read.csv("abfss://synapsefs@sparksynapsestr.dfs.core.windows.net/spark-sql-demo/products.csv", header=True, inferSchema=True)
-orders_df = spark.read.csv("abfss://synapsefs@sparksynapsestr.dfs.core.windows.net/spark-sql-demo/orders.csv", header=True, inferSchema=True)
+customers_df = spark.read.csv(
+    "abfss://synapsefs@synapsestorage123.dfs.core.windows.net/spark-sql-demo/customers.csv",
+    header=True, inferSchema=True)
+products_df = spark.read.csv(
+    "abfss://synapsefs@synapsestorage123.dfs.core.windows.net/spark-sql-demo/products.csv",
+    header=True, inferSchema=True)
+orders_df = spark.read.csv(
+    "abfss://synapsefs@synapsestorage123.dfs.core.windows.net/spark-sql-demo/orders.csv",
+    header=True, inferSchema=True)
 
 # Register views
 customers_df.createOrReplaceTempView("customers")
 products_df.createOrReplaceTempView("products")
 orders_df.createOrReplaceTempView("orders")
 
-# Execute and display
-query = "SELECT c.customer_id, c.customer_name, COUNT(o.order_id) AS orders, SUM(o.total_amount) AS revenue FROM orders o JOIN customers c ON o.customer_id = c.customer_id GROUP BY c.customer_id, c.customer_name ORDER BY revenue DESC"
+# Execute queries
+query = """
+SELECT c.customer_id, c.customer_name, COUNT(o.order_id) AS orders, SUM(o.total_amount) AS revenue
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+GROUP BY c.customer_id, c.customer_name
+ORDER BY revenue DESC
+"""
+
 spark.sql(query).show()
 
 # Save results
-spark.sql(query).write.mode("overwrite").parquet("abfss://synapsefs@sparksynapsestr.dfs.core.windows.net/spark-sql-demo/output")
-EOF
+spark.sql(query).write.mode("overwrite").parquet(
+    "abfss://synapsefs@synapsestorage123.dfs.core.windows.net/spark-sql-demo/output")
 ```
+
+### Step 7: Run Notebook
+
+1. Click "Run All"
+2. Monitor in Spark History
+3. Check output in Data Lake
 
 ---
 
-### Option C: Deploy via Docker Container
+## Azure Container Instances Deployment
 
-#### Step 1: Create Dockerfile
+### Prerequisites
+- Docker installed locally
+- Azure CLI installed
 
-Create a `Dockerfile` in the project root:
+### Step 1: Create Container Registry
 
-```dockerfile
-FROM python:3.9-slim
-
-# Install Java (required for Spark)
-RUN apt-get update && apt-get install -y openjdk-11-jdk-headless
-
-# Set JAVA_HOME
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
-
-# Set working directory
-WORKDIR /app
-
-# Copy project files
-COPY requirements.txt .
-COPY main.py .
-COPY data/ data/
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Create output directory
-RUN mkdir -p output
-
-# Run the application
-CMD ["python", "main.py"]
+```bash
+az acr create \
+  --resource-group spark-sql-rg \
+  --name sparkcontainerreg \
+  --sku Basic
 ```
 
-#### Step 2: Build Docker Image
+### Step 2: Build Docker Image
 
 ```bash
 docker build -t spark-sql-demo:latest .
 ```
 
-#### Step 3: Run Locally
+### Step 3: Tag Image
 
 ```bash
-docker run -v $(pwd)/output:/app/output spark-sql-demo:latest
+docker tag spark-sql-demo:latest sparkcontainerreg.azurecr.io/spark-sql-demo:latest
 ```
 
-#### Step 4: Push to Azure Container Registry
+### Step 4: Login to Registry
 
 ```bash
-# Create container registry
-az acr create \
-  --resource-group spark-sql-rg \
-  --name sparkcontainerreg \
-  --sku Basic
-
-# Login to registry
 az acr login --name sparkcontainerreg
+```
 
-# Tag image
-docker tag spark-sql-demo:latest sparkcontainerreg.azurecr.io/spark-sql-demo:latest
+### Step 5: Push to Registry
 
-# Push to registry
+```bash
 docker push sparkcontainerreg.azurecr.io/spark-sql-demo:latest
 ```
 
-#### Step 5: Deploy to Azure Container Instances
+### Step 6: Deploy to Container Instances
 
 ```bash
 az container create \
   --resource-group spark-sql-rg \
   --name spark-sql-container \
   --image sparkcontainerreg.azurecr.io/spark-sql-demo:latest \
-  --registry-login-server sparkcontainerreg.azurecr.io \
-  --registry-username <username> \
-  --registry-password <password>
+  --cpu 2 \
+  --memory 4
+```
+
+### Step 7: Monitor Container
+
+```bash
+# Get container status
+az container show \
+  --resource-group spark-sql-rg \
+  --name spark-sql-container \
+  --query "[ipAddress.ip, containers[0].instanceView.currentState.state]"
+
+# View logs
+az container logs \
+  --resource-group spark-sql-rg \
+  --name spark-sql-container
+```
+
+### Step 8: Download Results
+
+```bash
+# Connect to container and download outputs
+az container exec \
+  --resource-group spark-sql-rg \
+  --name spark-sql-container \
+  --exec-command "/bin/bash"
 ```
 
 ---
 
-## GitHub Actions - Automated Deployment
+## Microsoft Fabric Deployment
 
-### Step 1: Create GitHub Actions Workflow
+### Prerequisites
+- Microsoft Fabric capacity (F2 or higher)
+- Power BI subscription
+- Access to https://app.powerbi.com/
 
-Create `.github/workflows/deploy-to-azure.yml`:
+### Step 1: Create Workspace
+
+1. Go to https://app.powerbi.com/
+2. Click "Workspaces" in left sidebar
+3. Click "+ New workspace"
+4. Enter name: `spark-sql-demo`
+5. Select capacity: F2 (Trial) or higher
+6. Click "Apply"
+
+### Step 2: Create Lakehouse
+
+1. In workspace, click "+ New"
+2. Select "Lakehouse"
+3. Enter name: `spark_sql_data`
+4. Click "Create"
+
+### Step 3: Create Spark Notebook
+
+1. Click "+ New" → "Notebook"
+2. Name: `spark-sql-demo`
+3. Paste code from `fabric-notebook.py`
+
+### Step 4: Run Notebook Cells
+
+Run each cell sequentially:
+- Cell 1: Create sample data
+- Cell 2: Create Delta tables
+- Cell 3: Display tables
+- Cell 4: JOIN query
+- Cell 5: AGGREGATION query
+- Cell 6: CATEGORY analysis
+- Cell 7: TOP customers
+- Cell 8: Summary statistics
+
+### Step 5: Verify Delta Tables
+
+1. In Explorer panel, expand Lakehouse
+2. Verify tables created:
+   - `customers`
+   - `products`
+   - `orders`
+   - `customer_orders_details`
+   - `customer_sales_summary`
+
+### Step 6: Create SQL Query
+
+1. Click "+ New" → "SQL Query"
+2. Write query:
+
+```sql
+SELECT 
+    c.customer_name,
+    COUNT(o.order_id) AS orders,
+    SUM(o.total_amount) AS revenue
+FROM customer_sales_summary c
+GROUP BY c.customer_name
+ORDER BY revenue DESC
+```
+
+3. Click "Run"
+
+### Step 7: Create Power BI Report
+
+1. Click "+ New" → "Report"
+2. Select Lakehouse as data source
+3. Add visualizations:
+   - Bar chart: Revenue by customer
+   - Table: Customer details
+   - KPI: Total revenue
+
+### Step 8: Schedule Pipeline (Optional)
+
+1. Click "+ New" → "Data Pipeline"
+2. Add notebook activity
+3. Configure schedule
+4. Set frequency: Daily/Weekly
+
+---
+
+## GitHub Actions CI/CD
+
+### Step 1: Add Test Workflow
+
+Create `.github/workflows/test.yml`:
 
 ```yaml
-name: Deploy to Azure
+name: Test & Validate
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     
     - name: Set up Python
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v4
       with:
         python-version: '3.9'
     
@@ -412,87 +505,226 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
     
-    - name: Run tests
+    - name: Run Spark application
       run: python main.py
+    
+    - name: Upload results
+      uses: actions/upload-artifact@v3
+      with:
+        name: spark-output
+        path: output/
+```
+
+### Step 2: Add Databricks Deployment
+
+Create `.github/workflows/deploy-databricks.yml`:
+
+```yaml
+name: Deploy to Databricks
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Databricks CLI
+      run: pip install databricks-cli
+    
+    - name: Configure Databricks
+      env:
+        DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+        DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      run: |
+        mkdir -p ~/.databricks
+        echo "host = $DATABRICKS_HOST" > ~/.databricks/config
+        echo "token = $DATABRICKS_TOKEN" >> ~/.databricks/config
+    
+    - name: Upload files
+      run: |
+        databricks fs cp data/customers.csv dbfs:/spark-sql-demo/customers.csv --overwrite
+        databricks fs cp data/products.csv dbfs:/spark-sql-demo/products.csv --overwrite
+        databricks fs cp data/orders.csv dbfs:/spark-sql-demo/orders.csv --overwrite
+```
+
+### Step 3: Add Synapse Deployment
+
+Create `.github/workflows/deploy-synapse.yml`:
+
+```yaml
+name: Deploy to Synapse
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
     
     - name: Login to Azure
       uses: azure/login@v1
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
     
-    - name: Upload to Azure Storage
+    - name: Upload to Storage
       run: |
         az storage blob upload-batch \
-          --destination spark-sql-demo \
-          --source . \
-          --account-name sparksynapsestr
+          --destination synapsefs \
+          --source data/ \
+          --account-name ${{ secrets.SYNAPSE_STORAGE_ACCOUNT }} \
+          --account-key ${{ secrets.SYNAPSE_STORAGE_KEY }} \
+          --destination-path spark-sql-demo
 ```
 
-### Step 2: Add GitHub Secrets
+### Step 4: Add Container Deployment
 
-```bash
-# Generate Azure credentials
-az ad sp create-for-rbac --name github-actions --role contributor
+Create `.github/workflows/deploy-container.yml`:
 
-# Add to GitHub Secrets:
-# AZURE_CREDENTIALS: (output from above command)
+```yaml
+name: Deploy to Container Registry
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Build and push image
+      run: |
+        az acr build \
+          --registry ${{ secrets.AZURE_REGISTRY_NAME }} \
+          --image spark-sql-demo:latest .
 ```
+
+### Step 5: Configure Secrets
+
+1. Go to GitHub repository
+2. Settings → Secrets → New repository secret
+3. Add secrets:
+   - `AZURE_CREDENTIALS`
+   - `DATABRICKS_HOST`
+   - `DATABRICKS_TOKEN`
+   - `SYNAPSE_STORAGE_ACCOUNT`
+   - `SYNAPSE_STORAGE_KEY`
+   - `AZURE_REGISTRY_NAME`
 
 ---
 
 ## Monitoring & Troubleshooting
 
-### Check Spark Job Status
+### Common Issues
+
+**1. PySpark not found**
+```bash
+# Install Java first
+java -version
+
+# Reinstall PySpark
+pip install --force-reinstall pyspark==3.5.0
+```
+
+**2. JAVA_HOME not set**
+```bash
+# Linux/Mac
+export JAVA_HOME=/path/to/java
+export PATH=$JAVA_HOME/bin:$PATH
+
+# Windows - Set in Environment Variables
+```
+
+**3. Permission denied on DBFS**
+- Check Databricks token validity
+- Verify credentials in `.databricks/config`
+
+**4. Container won't start**
+```bash
+# Check logs
+docker logs <container-id>
+
+# Increase resources
+az container delete --name spark-sql-container --resource-group spark-sql-rg
+# Then recreate with more memory/CPU
+```
+
+### Monitoring Commands
 
 ```bash
-# For Databricks
+# Check Databricks jobs
 databricks jobs list
 databricks runs list
 
-# For Azure Synapse
-az synapse spark job list --workspace-name spark-sql-synapse --on-demand-pool sparksql-pool
-```
+# Check Synapse
+az synapse spark session list --workspace-name spark-sql-synapse
 
-### View Logs
+# Check containers
+az container list --resource-group spark-sql-rg
 
-```bash
-# Docker logs
-docker logs <container-id>
-
-# Azure Container Instances
+# View container logs
 az container logs --resource-group spark-sql-rg --name spark-sql-container
-```
-
-### Performance Tuning
-
-Add to `main.py` before creating SparkSession:
-
-```python
-spark = SparkSession.builder \
-    .appName("SparkSQL_Demo") \
-    .config("spark.sql.shuffle.partitions", "8") \
-    .config("spark.executor.memory", "4g") \
-    .config("spark.driver.memory", "2g") \
-    .config("spark.sql.adaptive.enabled", "true") \
-    .getOrCreate()
 ```
 
 ---
 
-## Cost Optimization for Azure
+## Cost Optimization
 
-1. **Use spot instances** for Databricks clusters
-2. **Auto-terminate clusters** after idle time
-3. **Schedule jobs** during off-peak hours
-4. **Use Synapse dedicated SQL pools** for frequent queries
-5. **Enable caching** in Spark for repeated operations
+### Databricks
+- Use spot instances: Save 60-70%
+- Auto-terminate clusters after 15 min
+- Resize clusters based on workload
+- Use standard nodes for non-critical tasks
+
+### Synapse
+- Use on-demand (no reserved capacity)
+- Pause dedicated pools when not in use
+- Optimize query performance
+- Use serverless Spark for interactive queries
+
+### Fabric
+- Start with F2 capacity
+- Scale up only when needed
+- Monitor capacity metrics
+- Optimize notebook execution
+
+### Container Instances
+- Use spot instances for testing
+- Set appropriate CPU/memory limits
+- Use scheduled scaling
+- Clean up containers after use
+
+### Estimated Monthly Costs
+
+| Service | Dev | Prod |
+|---------|-----|------|
+| Databricks | $100 | $500+ |
+| Synapse | $50 | $300+ |
+| Fabric | $200 | $500+ |
+| Container | $10 | $100+ |
+| Local Dev | $0 | $0 |
 
 ---
 
 ## Cleanup
 
 ### Local
-
 ```bash
 deactivate
 rm -rf venv/
@@ -500,14 +732,14 @@ rm -rf output/
 ```
 
 ### Azure Resources
-
 ```bash
-# Delete entire resource group (WARNING: deletes all resources)
+# Delete all resources
 az group delete --name spark-sql-rg --yes
 
-# Or delete specific resources
-az container delete --name spark-sql-container --resource-group spark-sql-rg --yes
+# Delete specific resources
 az databricks workspace delete --name spark-sql-workspace --resource-group spark-sql-rg
+az synapse workspace delete --name spark-sql-synapse --resource-group spark-sql-rg
+az container delete --name spark-sql-container --resource-group spark-sql-rg
 ```
 
 ---
@@ -515,8 +747,19 @@ az databricks workspace delete --name spark-sql-workspace --resource-group spark
 ## Additional Resources
 
 - [Apache Spark Documentation](https://spark.apache.org/docs/latest/)
-- [Azure Databricks Guide](https://docs.microsoft.com/en-us/azure/databricks/)
-- [Azure Synapse Analytics](https://docs.microsoft.com/en-us/azure/synapse-analytics/)
+- [Azure Databricks Guide](https://docs.microsoft.com/azure/databricks/)
+- [Azure Synapse Analytics](https://docs.microsoft.com/azure/synapse-analytics/)
+- [Microsoft Fabric](https://learn.microsoft.com/fabric/)
 - [Docker Documentation](https://docs.docker.com/)
-- [GitHub Actions for Azure](https://github.com/Azure/actions)
+- [GitHub Actions](https://github.com/features/actions)
 
+---
+
+## Support & Troubleshooting
+
+For issues:
+1. Check the documentation files in the repo
+2. Review the logs and error messages
+3. Verify credentials and permissions
+4. Check Azure quota limits
+5. Consult official documentation links above
