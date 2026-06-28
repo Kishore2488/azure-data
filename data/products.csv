@@ -1,0 +1,9 @@
+product_id,product_name,category,price
+101,Laptop,Electronics,999.99
+102,Mouse,Electronics,29.99
+103,Keyboard,Electronics,79.99
+104,Monitor,Electronics,349.99
+105,Desk Chair,Furniture,199.99
+106,Standing Desk,Furniture,499.99
+107,Coffee Maker,Appliances,89.99
+108,Microwave,Appliances,149.99
